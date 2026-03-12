@@ -444,7 +444,7 @@ export default function Compteurs() {
                 </div>
             </div>
 
-            {/* PlayStation 5 Section */}}
+            {/* PlayStation 5 Section */}
             <div>
                 <div className="flex items-center justify-between mb-6">
                     <div>
@@ -496,7 +496,7 @@ export default function Compteurs() {
                 </div>
             </div>
 
-            {/* PlayStation 4 Section */}}
+            {/* PlayStation 4 Section */}
             <div>
                 <div className="flex items-center justify-between mb-6">
                     <div>
