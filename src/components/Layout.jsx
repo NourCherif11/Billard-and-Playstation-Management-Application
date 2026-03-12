@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useApp } from '@/context/AppContext'
@@ -36,6 +36,9 @@ import {
     Check,
     UserCog,
     Coffee,
+    Bell,
+    Package,
+    AlertTriangle,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabaseClient'
 
@@ -49,7 +52,7 @@ const navItems = [
 
 export default function Layout() {
     const { user, logout, refreshUser } = useAuth()
-    const { settings } = useApp()
+    const { settings, drinks } = useApp()
     const location = useLocation()
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [editProfileOpen, setEditProfileOpen] = useState(false)
@@ -62,6 +65,17 @@ export default function Layout() {
     const [profileLoading, setProfileLoading] = useState(false)
     const [profileError, setProfileError] = useState('')
     const [profileSuccess, setProfileSuccess] = useState('')
+
+    // Low-stock notification
+    const lowStockDrinks = drinks.filter(d => d.stock !== null && d.stock !== undefined && d.stock < (settings?.lowStockThreshold ?? 5))
+    const [notifOpen, setNotifOpen] = useState(false)
+    const prevLowCountRef = useRef(0)
+    useEffect(() => {
+        if (lowStockDrinks.length > prevLowCountRef.current) {
+            setNotifOpen(true)
+        }
+        prevLowCountRef.current = lowStockDrinks.length
+    }, [lowStockDrinks.length])
 
     const currentPage = navItems.find(item => location.pathname.startsWith(item.path))
 
@@ -192,10 +206,10 @@ export default function Layout() {
                 <div className="p-6 flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-3">
                         <div className="w-16 h-16 rounded-xl overflow-hidden logo-container">
-                            <img src="https://zvxvjztilxoqmadhukwc.supabase.co/storage/v1/object/public/images/gameparklogo.png" alt="GamePark Logo" className="w-full h-full object-cover logo-spin" />
+                            <img src={`${import.meta.env.BASE_URL}gameparksousse/GameNightLogo.PNG`} alt="GameNightHall Logo" className="w-full h-full object-cover logo-spin" />
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold gradient-text">GamePark</h1>
+                            <h1 className="text-lg font-bold gradient-text">GameNightHall</h1>
                             <p className="text-xs text-muted-foreground">Système de gestion</p>
                         </div>
                     </div>
@@ -390,7 +404,7 @@ export default function Layout() {
                                 <Menu className="w-5 h-5" />
                             </button>
                             <div>
-                                <h2 className="text-lg font-semibold">{currentPage?.label || 'GamePark'}</h2>
+                                <h2 className="text-lg font-semibold">{currentPage?.label || 'GameNightHall'}</h2>
                                 <p className="text-xs text-muted-foreground hidden sm:block">{currentPage?.description}</p>
                             </div>
                         </div>
@@ -400,6 +414,19 @@ export default function Layout() {
                                 <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
                                 Système en ligne
                             </div>
+                            {/* Low-stock notification bell */}
+                            {lowStockDrinks.length > 0 && (
+                                <button
+                                    onClick={() => setNotifOpen(v => !v)}
+                                    className="relative p-2 rounded-full hover:bg-accent/50 transition-colors"
+                                    title="Alertes stock"
+                                >
+                                    <Bell className="w-5 h-5 text-amber-500" />
+                                    <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                                        {lowStockDrinks.length}
+                                    </span>
+                                </button>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -409,6 +436,59 @@ export default function Layout() {
                     <Outlet />
                 </main>
             </div>
+
+            {/* Floating low-stock notification panel */}
+            {notifOpen && lowStockDrinks.length > 0 && (
+                <div className="fixed bottom-6 right-6 z-50 w-80 shadow-2xl">
+                    <div className="bg-card border border-amber-500/40 rounded-2xl overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 bg-amber-500/10 border-b border-amber-500/20">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                <span className="font-semibold text-sm text-amber-700 dark:text-amber-400">
+                                    Stock faible
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => setNotifOpen(false)}
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        {/* Drink list */}
+                        <div className="px-4 py-3 space-y-2 max-h-60 overflow-y-auto">
+                            {lowStockDrinks.map(drink => (
+                                <div key={drink.id} className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                                        <span className="text-sm font-medium">{drink.name}</span>
+                                    </div>
+                                    <span
+                                        className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                            drink.stock === 0
+                                                ? 'bg-red-500/15 text-red-600'
+                                                : 'bg-amber-500/15 text-amber-700'
+                                        }`}
+                                    >
+                                        {drink.stock === 0 ? 'Épuisé' : `${drink.stock} restant${drink.stock > 1 ? 's' : ''}`}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="px-4 py-2 border-t border-border/50">
+                            <p className="text-xs text-muted-foreground">
+                                {lowStockDrinks.filter(d => d.stock === 0).length > 0
+                                    ? `${lowStockDrinks.filter(d => d.stock === 0).length} épuisé(s), `
+                                    : ''}
+                                {lowStockDrinks.filter(d => d.stock > 0).length > 0
+                                    ? `${lowStockDrinks.filter(d => d.stock > 0).length} faible(s)`
+                                    : ''}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

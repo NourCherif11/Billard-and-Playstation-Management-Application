@@ -145,8 +145,8 @@ export default function PrintReceipt({ bill, billItems }) {
             `}</style>
 
             <div className="receipt-header">
-                <img src="https://zvxvjztilxoqmadhukwc.supabase.co/storage/v1/object/public/images/gameparklogo.png" alt="GamePark Logo" className="receipt-logo" />
-                <div className="receipt-title">GAMEPARK</div>
+                <img src={`${import.meta.env.BASE_URL}gameparksousse/GameNightLogo.PNG`} alt="GameNightHall Logo" className="receipt-logo" />
+                <div className="receipt-title">GAMENIGHTHALL</div>
                 <div className="receipt-info">Gaming & Pool Club</div>
                 <div className="receipt-info">--------------------------------</div>
                 <div className="receipt-info">Facture #{bill.id.slice(-8).toUpperCase()}</div>
@@ -212,7 +212,7 @@ export default function PrintReceipt({ bill, billItems }) {
                     <span><strong>{cashierName}</strong></span>
                 </div>
                 <div style={{ borderTop: '1px dashed #000', paddingTop: '8px' }}>Merci de votre visite!</div>
-                <div style={{ marginTop: '5px' }}>À bientôt chez GamePark</div>
+                <div style={{ marginTop: '5px' }}>À bientôt chez GameNightHall</div>
                 <div style={{ marginTop: '10px', fontSize: '8pt' }}>
                     ================================
                 </div>

@@ -50,9 +50,9 @@ export default function Login() {
                 {/* Logo */}
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center justify-center w-32 h-32 rounded-2xl overflow-hidden mb-4 logo-container">
-                        <img src="https://zvxvjztilxoqmadhukwc.supabase.co/storage/v1/object/public/images/gameparklogo.png" alt="GamePark Logo" className="w-full h-full object-cover logo-spin" />
+                        <img src={`${import.meta.env.BASE_URL}gameparksousse/GameNightLogo.PNG`} alt="GameNightHall Logo" className="w-full h-full object-cover logo-spin" />
                     </div>
-                    <h1 className="text-3xl font-bold gradient-text">GamePark</h1>
+                    <h1 className="text-3xl font-bold gradient-text">GameNightHall</h1>
                     <p className="text-muted-foreground mt-1">Système de gestion de billard</p>
                 </div>
 

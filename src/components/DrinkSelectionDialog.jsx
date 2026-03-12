@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useApp } from '@/context/AppContext'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -9,9 +9,8 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Separator } from '@/components/ui/separator'
 import { formatPrice } from '@/lib/utils'
-import { Plus, Minus, Coffee, X, ShoppingCart, Wine, Droplet, Soup, Apple, Zap, MoreHorizontal } from 'lucide-react'
+import { Plus, Minus, Coffee, X, Wine, Droplet, Soup, Apple, Zap, MoreHorizontal, Package } from 'lucide-react'
 
 const CATEGORIES = [
     { value: 'all', label: 'Tout', icon: MoreHorizontal },
@@ -23,14 +22,39 @@ const CATEGORIES = [
 ]
 
 export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
-    const { drinks, addDrinkToCounter } = useApp()
+    const { drinks, setCounterDrinks, settings } = useApp()
     const [selectedDrinks, setSelectedDrinks] = useState({})
     const [activeCategory, setActiveCategory] = useState('all')
 
+    // Pre-populate with existing counter drinks every time the dialog opens
+    useEffect(() => {
+        if (open) {
+            const initial = {}
+            if (counter?.drinks) {
+                counter.drinks.forEach(d => {
+                    if (!d.__multiplier && d.id) {
+                        initial[d.id] = d.quantity || 1
+                    }
+                })
+            }
+            setSelectedDrinks(initial)
+        }
+    }, [open, counter?.id])
+
+    // drink.stock from context is already effective (DB minus ALL active carts including this one).
+    // Add back this counter's own reservation to get the real ceiling for this session.
+    const originalQtyForDrink = (drinkId) =>
+        counter?.drinks?.find(d => d.id === drinkId)?.quantity || 0
+
     const handleAddDrink = (drink) => {
+        if (drink.stock !== null && drink.stock !== undefined) {
+            const currentQty = selectedDrinks[drink.id] || 0
+            const maxAllowed = drink.stock + originalQtyForDrink(drink.id)
+            if (currentQty >= maxAllowed) return
+        }
         setSelectedDrinks(prev => ({
             ...prev,
-            [drink.id]: (prev[drink.id] || 0) + 1
+            [drink.id]: (prev[drink.id] || 0) + 1,
         }))
     }
 
@@ -46,14 +70,15 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
     }
 
     const handleConfirm = () => {
-        Object.entries(selectedDrinks).forEach(([drinkId, quantity]) => {
-            if (quantity > 0) {
+        const newDrinks = Object.entries(selectedDrinks)
+            .filter(([, qty]) => qty > 0)
+            .map(([drinkId, quantity]) => {
                 const drink = drinks.find(d => d.id === drinkId)
-                if (drink) {
-                    addDrinkToCounter(counter.id, drink, quantity)
-                }
-            }
-        })
+                    || counter?.drinks?.find(d => d.id === drinkId)
+                return drink ? { ...drink, quantity } : null
+            })
+            .filter(Boolean)
+        setCounterDrinks(counter.id, newDrinks)
         setSelectedDrinks({})
         onOpenChange(false)
     }
@@ -66,14 +91,12 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
     const totalItems = Object.values(selectedDrinks).reduce((sum, qty) => sum + qty, 0)
     const totalPrice = Object.entries(selectedDrinks).reduce((sum, [drinkId, qty]) => {
         const drink = drinks.find(d => d.id === drinkId)
+            || counter?.drinks?.find(d => d.id === drinkId)
         return sum + (drink ? drink.price * qty : 0)
     }, 0)
 
-    // Current drinks on the counter
-    const currentDrinks = counter?.drinks || []
-    const currentDrinksTotal = currentDrinks.reduce((sum, d) => sum + (d.price * d.quantity), 0)
+    const hadDrinksBefore = (counter?.drinks || []).filter(d => !d.__multiplier).length > 0
 
-    // Filter drinks by category
     const filteredDrinks = activeCategory === 'all'
         ? drinks
         : drinks.filter(d => d.category === activeCategory)
@@ -87,26 +110,12 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                         <Coffee className="w-5 h-5 text-orange-500" />
                         <span>Boissons - {counter?.name}</span>
                     </DialogTitle>
+                    {hadDrinksBefore && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Ajustez les quantités ou supprimez des boissons déjà ajoutées.
+                        </p>
+                    )}
                 </DialogHeader>
-
-                {/* Current drinks banner - only if has drinks */}
-                {currentDrinks.length > 0 && (
-                    <div className="px-6 pt-4 shrink-0">
-                        <div className="bg-orange-50 dark:bg-orange-950/20 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <ShoppingCart className="w-4 h-4 text-orange-600" />
-                                    <span className="font-semibold text-sm">
-                                        {currentDrinks.reduce((sum, d) => sum + d.quantity, 0)} boisson{currentDrinks.reduce((sum, d) => sum + d.quantity, 0) > 1 ? 's' : ''} sur ce compteur
-                                    </span>
-                                </div>
-                                <span className="text-lg font-bold text-orange-600">
-                                    {formatPrice(currentDrinksTotal)}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* Category Tabs */}
                 <Tabs value={activeCategory} onValueChange={setActiveCategory} className="flex-1 flex flex-col min-h-0">
@@ -134,7 +143,7 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                         </TabsList>
                     </div>
 
-                    {/* Scrollable Content */}
+                    {/* Scrollable drink list */}
                     <TabsContent
                         value={activeCategory}
                         className="flex-1 mt-0 overflow-y-auto px-6 py-4"
@@ -144,6 +153,15 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                             <div className="grid gap-3 pb-2">
                                 {filteredDrinks.map(drink => {
                                     const qty = selectedDrinks[drink.id] || 0
+                                    const origQty = originalQtyForDrink(drink.id)
+                                    const maxAllowed = drink.stock !== null && drink.stock !== undefined
+                                        ? drink.stock + origQty
+                                        : Infinity
+                                    const canAdd = maxAllowed === Infinity || qty < maxAllowed
+                                    // Fully unavailable = no stock AND not already in this counter's cart
+                                    const isFullyUnavailable = drink.stock !== null && drink.stock !== undefined
+                                        && drink.stock === 0 && origQty === 0
+
                                     return (
                                         <div
                                             key={drink.id}
@@ -160,6 +178,25 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                                                 <p className="text-lg font-bold text-orange-500 mt-0.5">
                                                     {formatPrice(drink.price)}
                                                 </p>
+                                                {drink.stock !== null && drink.stock !== undefined && (
+                                                    <div className="mt-1">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[10px] px-1 py-0 h-4 ${
+                                                                isFullyUnavailable
+                                                                    ? 'border-red-500 text-red-500'
+                                                                    : (drink.stock + origQty) < (settings?.lowStockThreshold ?? 5)
+                                                                        ? 'border-amber-500 text-amber-600'
+                                                                        : 'border-green-500 text-green-600'
+                                                            }`}
+                                                        >
+                                                            <Package className="w-2.5 h-2.5 mr-0.5" />
+                                                            {isFullyUnavailable
+                                                                ? 'Épuisé'
+                                                                : `${drink.stock + origQty} dispo`}
+                                                        </Badge>
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                                 {qty > 0 ? (
@@ -182,6 +219,7 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                                                             variant="outline"
                                                             className="h-9 w-9 p-0"
                                                             onClick={() => handleAddDrink(drink)}
+                                                            disabled={!canAdd}
                                                         >
                                                             <Plus className="w-4 h-4" />
                                                         </Button>
@@ -191,9 +229,11 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                                                         size="sm"
                                                         className="bg-orange-500 hover:bg-orange-600 h-9 px-4"
                                                         onClick={() => handleAddDrink(drink)}
+                                                        disabled={isFullyUnavailable}
                                                     >
-                                                        <Plus className="w-4 h-4 mr-1" />
-                                                        Ajouter
+                                                        {isFullyUnavailable ? 'Épuisé' : (
+                                                            <><Plus className="w-4 h-4 mr-1" />Ajouter</>
+                                                        )}
                                                     </Button>
                                                 )}
                                             </div>
@@ -212,14 +252,14 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
 
                 {/* Fixed Footer */}
                 <div className="border-t bg-background shrink-0">
-                    {/* Selection Summary */}
+                    {/* Selection summary */}
                     {totalItems > 0 && (
                         <div className="px-6 pt-4">
                             <div className="bg-orange-50 dark:bg-orange-950/20 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-sm text-muted-foreground">
-                                            Sélection: {totalItems} article{totalItems > 1 ? 's' : ''}
+                                            Total sélection : {totalItems} article{totalItems > 1 ? 's' : ''}
                                         </p>
                                         <p className="text-2xl font-bold text-orange-600 mt-1">
                                             {formatPrice(totalPrice)}
@@ -231,7 +271,7 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                                         size="sm"
                                     >
                                         <X className="w-4 h-4 mr-1" />
-                                        Vider
+                                        Tout retirer
                                     </Button>
                                 </div>
                             </div>
@@ -246,10 +286,12 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
                         <Button
                             onClick={handleConfirm}
                             className="bg-orange-500 hover:bg-orange-600 px-6"
-                            disabled={totalItems === 0}
+                            disabled={!hadDrinksBefore && totalItems === 0}
                         >
-                            <Plus className="w-4 h-4 mr-2" />
-                            Ajouter au compteur
+                            {hadDrinksBefore
+                                ? 'Mettre à jour'
+                                : <><Plus className="w-4 h-4 mr-2" />Ajouter au compteur</>
+                            }
                         </Button>
                     </div>
                 </div>
@@ -257,3 +299,4 @@ export default function DrinkSelectionDialog({ open, onOpenChange, counter }) {
         </Dialog>
     )
 }
+

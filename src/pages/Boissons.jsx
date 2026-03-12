@@ -22,7 +22,7 @@ import {
     SelectValue,
 } from '@/components/ui/select'
 import { formatPrice } from '@/lib/utils'
-import { Plus, Trash2, Edit2, ShoppingCart, Coffee, X } from 'lucide-react'
+import { Plus, Trash2, Edit2, ShoppingCart, Coffee, X, Package, AlertTriangle, Settings } from 'lucide-react'
 
 const CATEGORIES = [
     { value: 'soft_drinks', label: 'Boissons Fraîches' },
@@ -33,9 +33,14 @@ const CATEGORIES = [
     { value: 'other', label: 'Autres' },
 ]
 
-function DrinkCard({ drink, onEdit, onDelete, onAddToCart, isSuperAdmin }) {
+function DrinkCard({ drink, onEdit, onDelete, onAddToCart, isSuperAdmin, cartQty, lowStockThreshold }) {
+    const stockTracked = drink.stock !== null && drink.stock !== undefined
+    const isOutOfStock = stockTracked && drink.stock === 0
+    const isLowStock = stockTracked && drink.stock > 0 && drink.stock < lowStockThreshold
+    const canAdd = !isOutOfStock && (!stockTracked || cartQty < drink.stock)
+
     return (
-        <Card className="hover:shadow-md transition-shadow">
+        <Card className={`hover:shadow-md transition-shadow ${isOutOfStock ? 'opacity-60' : ''}`}>
             <CardContent className="p-4">
                 <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
@@ -43,6 +48,23 @@ function DrinkCard({ drink, onEdit, onDelete, onAddToCart, isSuperAdmin }) {
                         <p className="text-2xl font-bold text-orange-500 mt-1">
                             {formatPrice(drink.price)}
                         </p>
+                        {stockTracked && (
+                            <div className="mt-1">
+                                <Badge
+                                    variant="outline"
+                                    className={`text-xs font-medium ${
+                                        isOutOfStock
+                                            ? 'border-red-500 text-red-500 bg-red-500/10'
+                                            : isLowStock
+                                                ? 'border-amber-500 text-amber-600 bg-amber-500/10'
+                                                : 'border-green-500 text-green-600 bg-green-500/10'
+                                    }`}
+                                >
+                                    <Package className="w-3 h-3 mr-1" />
+                                    {isOutOfStock ? 'Épuisé' : `Stock: ${drink.stock}`}
+                                </Badge>
+                            </div>
+                        )}
                     </div>
                     {isSuperAdmin && (
                         <div className="flex gap-1">
@@ -67,11 +89,25 @@ function DrinkCard({ drink, onEdit, onDelete, onAddToCart, isSuperAdmin }) {
                 </div>
                 <Button
                     onClick={() => onAddToCart(drink)}
-                    className="w-full bg-orange-500 hover:bg-orange-600"
+                    className={`w-full ${
+                        isOutOfStock
+                            ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                            : 'bg-orange-500 hover:bg-orange-600'
+                    }`}
                     size="sm"
+                    disabled={!canAdd}
                 >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Ajouter
+                    {isOutOfStock ? (
+                        <>
+                            <X className="w-4 h-4 mr-1" />
+                            Épuisé
+                        </>
+                    ) : (
+                        <>
+                            <Plus className="w-4 h-4 mr-1" />
+                            {!canAdd ? 'Stock max atteint' : 'Ajouter'}
+                        </>
+                    )}
                 </Button>
             </CardContent>
         </Card>
@@ -79,8 +115,9 @@ function DrinkCard({ drink, onEdit, onDelete, onAddToCart, isSuperAdmin }) {
 }
 
 export default function Boissons() {
-    const { drinks, addNewDrink, editDrink, removeDrink, createBill } = useApp()
+    const { drinks, addNewDrink, editDrink, removeDrink, createBill, settings, updateAppSettings } = useApp()
     const isSuperAdmin = useIsSuperAdmin()
+    const lowStockThreshold = settings?.lowStockThreshold ?? 5
 
     const [cart, setCart] = useState([])
     const [playerName, setPlayerName] = useState('')
@@ -93,10 +130,31 @@ export default function Boissons() {
         name: '',
         price: '',
         category: 'soft_drinks',
+        stock: '',
     })
+
+    // Low-stock threshold settings dialog
+    const [thresholdOpen, setThresholdOpen] = useState(false)
+    const [thresholdInput, setThresholdInput] = useState('')
+
+    const handleOpenThreshold = () => {
+        setThresholdInput(String(lowStockThreshold))
+        setThresholdOpen(true)
+    }
+
+    const handleSaveThreshold = async () => {
+        const val = parseInt(thresholdInput, 10)
+        if (isNaN(val) || val < 1) return
+        await updateAppSettings({ lowStockThreshold: val })
+        setThresholdOpen(false)
+    }
 
     const handleAddToCart = (drink) => {
         const existing = cart.find(item => item.id === drink.id)
+        const currentQty = existing ? existing.quantity : 0
+        // Don't exceed available stock
+        if (drink.stock !== null && drink.stock !== undefined && currentQty >= drink.stock) return
+
         if (existing) {
             setCart(cart.map(item =>
                 item.id === drink.id
@@ -116,6 +174,8 @@ export default function Boissons() {
         setCart(cart.map(item => {
             if (item.id === drinkId) {
                 const newQuantity = item.quantity + change
+                // Don't exceed stock
+                if (change > 0 && item.stock !== null && item.stock !== undefined && newQuantity > item.stock) return item
                 return newQuantity > 0 ? { ...item, quantity: newQuantity } : item
             }
             return item
@@ -151,7 +211,7 @@ export default function Boissons() {
     }
 
     const handleOpenAddDrink = () => {
-        setDrinkForm({ name: '', price: '', category: 'soft_drinks' })
+        setDrinkForm({ name: '', price: '', category: 'soft_drinks', stock: '' })
         setAddDrinkOpen(true)
     }
 
@@ -160,18 +220,21 @@ export default function Boissons() {
             name: drink.name,
             price: drink.price.toString(),
             category: drink.category,
+            stock: drink.stock !== null && drink.stock !== undefined ? drink.stock.toString() : '',
         })
         setEditingDrink(drink)
     }
 
     const handleSaveDrink = async () => {
         if (!drinkForm.name.trim() || !drinkForm.price) return
+        const stockValue = drinkForm.stock !== '' ? parseInt(drinkForm.stock, 10) : null
 
         if (editingDrink) {
             await editDrink(editingDrink.id, {
                 name: drinkForm.name.trim(),
                 price: parseFloat(drinkForm.price),
                 category: drinkForm.category,
+                stock: stockValue,
             })
             setEditingDrink(null)
         } else {
@@ -179,6 +242,7 @@ export default function Boissons() {
                 name: drinkForm.name.trim(),
                 price: parseFloat(drinkForm.price),
                 category: drinkForm.category,
+                stock: stockValue,
             })
             setAddDrinkOpen(false)
         }
@@ -199,6 +263,9 @@ export default function Boissons() {
         drinksByCategory[drink.category].push(drink)
     })
 
+    // Low-stock drinks (tracked and below threshold)
+    const lowStockDrinks = drinks.filter(d => d.stock !== null && d.stock !== undefined && d.stock < lowStockThreshold)
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -210,6 +277,12 @@ export default function Boissons() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    {isSuperAdmin && (
+                        <Button onClick={handleOpenThreshold} variant="outline" size="sm">
+                            <Settings className="w-4 h-4 mr-2" />
+                            Seuil stock
+                        </Button>
+                    )}
                     {isSuperAdmin && (
                         <Button onClick={handleOpenAddDrink} variant="outline">
                             <Plus className="w-4 h-4 mr-2" />
@@ -226,8 +299,36 @@ export default function Boissons() {
                     </Button>
                 </div>
             </div>
-
-            {/* Cart Summary */}
+            {/* Low-stock warning banner */}
+            {isSuperAdmin && lowStockDrinks.length > 0 && (
+                <Card className="border-amber-500/50 bg-amber-500/5">
+                    <CardContent className="p-4">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-semibold text-amber-700 dark:text-amber-400 mb-2">
+                                    Stock faible — {lowStockDrinks.length} boisson{lowStockDrinks.length > 1 ? 's' : ''} à réapprovisionner
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    {lowStockDrinks.map(d => (
+                                        <Badge
+                                            key={d.id}
+                                            variant="outline"
+                                            className={`${
+                                                d.stock === 0
+                                                    ? 'border-red-500 text-red-600 bg-red-500/10'
+                                                    : 'border-amber-500 text-amber-600 bg-amber-500/10'
+                                            }`}
+                                        >
+                                            {d.name}: {d.stock === 0 ? 'Épuisé' : d.stock + ' restant' + (d.stock > 1 ? 's' : '')}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
             {cart.length > 0 && (
                 <Card className="bg-orange-50 border-orange-200">
                     <CardContent className="p-4">
@@ -263,6 +364,8 @@ export default function Boissons() {
                                     onDelete={setDeletingDrink}
                                     onAddToCart={handleAddToCart}
                                     isSuperAdmin={isSuperAdmin}
+                                    cartQty={cart.find(i => i.id === drink.id)?.quantity || 0}
+                                    lowStockThreshold={lowStockThreshold}
                                 />
                             ))}
                         </div>
@@ -415,6 +518,21 @@ export default function Boissons() {
                                 </SelectContent>
                             </Select>
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="drink-stock">
+                                Stock initial
+                                <span className="text-xs text-muted-foreground ml-2">(laisser vide pour ne pas suivre le stock)</span>
+                            </Label>
+                            <Input
+                                id="drink-stock"
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={drinkForm.stock}
+                                onChange={(e) => setDrinkForm({ ...drinkForm, stock: e.target.value })}
+                                placeholder="Ex: 24"
+                            />
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => {
@@ -445,6 +563,45 @@ export default function Boissons() {
                         </Button>
                         <Button variant="destructive" onClick={handleDeleteDrink}>
                             Supprimer
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Low-stock Threshold Dialog */}
+            <Dialog open={thresholdOpen} onOpenChange={setThresholdOpen}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Settings className="w-5 h-5 text-orange-500" />
+                            Seuil d’alerte stock
+                        </DialogTitle>
+                        <DialogDescription>
+                            Le stock sera considéré comme faible lorsqu’il passe en dessous de ce nombre. Actuellement : <strong>{lowStockThreshold}</strong>
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="threshold-input">Seuil (nombre d’unités)</Label>
+                            <Input
+                                id="threshold-input"
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={thresholdInput}
+                                onChange={(e) => setThresholdInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveThreshold()}
+                                className="text-center text-xl h-12 font-mono-timer"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Toute boisson avec un stock strictement inférieur à cette valeur sera signalée en alerte.
+                            </p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setThresholdOpen(false)}>Annuler</Button>
+                        <Button onClick={handleSaveThreshold} className="bg-orange-500 hover:bg-orange-600">
+                            Enregistrer
                         </Button>
                     </DialogFooter>
                 </DialogContent>

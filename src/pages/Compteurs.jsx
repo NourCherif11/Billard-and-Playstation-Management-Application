@@ -16,9 +16,9 @@ import {
 } from '@/components/ui/dialog'
 import DrinkSelectionDialog from '@/components/DrinkSelectionDialog'
 import { formatDuration, formatPrice, formatTime, calculateCounterPrice } from '@/lib/utils'
-import { Play, Square, Clock, DollarSign, Timer, Plus, Trash2, Settings, Coffee } from 'lucide-react'
+import { Play, Square, Clock, DollarSign, Timer, Plus, Trash2, Settings, Coffee, Clock2 } from 'lucide-react'
 
-function CounterCard({ counter, settings, onStart, onStop, onEdit, onDelete, onOpenDrinks, isSuperAdmin, currentUser }) {
+function CounterCard({ counter, settings, onStart, onStop, onEdit, onDelete, onOpenDrinks, onAdjustTime, isSuperAdmin, currentUser }) {
     const isActive = counter.active
     const multiplier = counter.multiplier || 1
     const price = isActive ? calculateCounterPrice(counter.elapsed, settings, multiplier) : 0
@@ -133,6 +133,17 @@ function CounterCard({ counter, settings, onStart, onStop, onEdit, onDelete, onO
                                 )}
                             </Button>
                         )}
+                        {isSuperAdmin && isActive && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-blue-500 hover:text-blue-600 hover:bg-blue-50"
+                                onClick={() => onAdjustTime(counter)}
+                                title="Ajuster le temps"
+                            >
+                                <Clock2 className="w-4 h-4" />
+                            </Button>
+                        )}
                         {isSuperAdmin && !isActive && (
                             <Button
                                 variant="ghost"
@@ -227,7 +238,7 @@ function CounterCard({ counter, settings, onStart, onStop, onEdit, onDelete, onO
 }
 
 export default function Compteurs() {
-    const { counters, counterSettings, startCounter, stopCounter, createBill, updateBill, addNewCounter, editCounter, removeCounter, updatePricingSettings } = useApp()
+    const { counters, counterSettings, startCounter, stopCounter, createBill, updateBill, addNewCounter, editCounter, removeCounter, updatePricingSettings, adjustCounterTime } = useApp()
     const { user } = useAuth()
     const isSuperAdmin = useIsSuperAdmin()
     const [sessionInfo, setSessionInfo] = useState(null)
@@ -242,6 +253,32 @@ export default function Compteurs() {
     const [settingsValues, setSettingsValues] = useState({})
     const [settingsError, setSettingsError] = useState(null)
     const [drinkDialogCounter, setDrinkDialogCounter] = useState(null)
+
+    // Adjust time state
+    const [adjustTimeCounter, setAdjustTimeCounter] = useState(null)
+    const [adjustHours, setAdjustHours] = useState('0')
+    const [adjustMinutes, setAdjustMinutes] = useState('0')
+    const [adjustSeconds, setAdjustSeconds] = useState('0')
+
+    const handleOpenAdjustTime = (counter) => {
+        const h = Math.floor(counter.elapsed / 3600)
+        const m = Math.floor((counter.elapsed % 3600) / 60)
+        const s = counter.elapsed % 60
+        setAdjustHours(String(h))
+        setAdjustMinutes(String(m))
+        setAdjustSeconds(String(s))
+        setAdjustTimeCounter(counter)
+    }
+
+    const handleConfirmAdjustTime = async () => {
+        if (!adjustTimeCounter) return
+        const h = Math.max(0, parseInt(adjustHours, 10) || 0)
+        const m = Math.max(0, Math.min(59, parseInt(adjustMinutes, 10) || 0))
+        const s = Math.max(0, Math.min(59, parseInt(adjustSeconds, 10) || 0))
+        const totalSeconds = h * 3600 + m * 60 + s
+        await adjustCounterTime(adjustTimeCounter.id, totalSeconds)
+        setAdjustTimeCounter(null)
+    }
 
     const handleStart = (counterId, multiplier = 1) => {
         startCounter(counterId, multiplier)
@@ -399,6 +436,7 @@ export default function Compteurs() {
                             onEdit={handleEditCounter}
                             onDelete={setDeletingCounter}
                             onOpenDrinks={setDrinkDialogCounter}
+                            onAdjustTime={handleOpenAdjustTime}
                             isSuperAdmin={isSuperAdmin}
                             currentUser={user}
                         />
@@ -406,7 +444,7 @@ export default function Compteurs() {
                 </div>
             </div>
 
-            {/* PlayStation 5 Section */}
+            {/* PlayStation 5 Section */}}
             <div>
                 <div className="flex items-center justify-between mb-6">
                     <div>
@@ -450,6 +488,7 @@ export default function Compteurs() {
                             onEdit={handleEditCounter}
                             onDelete={setDeletingCounter}
                             onOpenDrinks={setDrinkDialogCounter}
+                            onAdjustTime={handleOpenAdjustTime}
                             isSuperAdmin={isSuperAdmin}
                             currentUser={user}
                         />
@@ -457,7 +496,7 @@ export default function Compteurs() {
                 </div>
             </div>
 
-            {/* PlayStation 4 Section */}
+            {/* PlayStation 4 Section */}}
             <div>
                 <div className="flex items-center justify-between mb-6">
                     <div>
@@ -501,6 +540,7 @@ export default function Compteurs() {
                             onEdit={handleEditCounter}
                             onDelete={setDeletingCounter}
                             onOpenDrinks={setDrinkDialogCounter}
+                            onAdjustTime={handleOpenAdjustTime}
                             isSuperAdmin={isSuperAdmin}
                             currentUser={user}
                         />
@@ -721,6 +761,112 @@ export default function Compteurs() {
                 onOpenChange={(open) => !open && setDrinkDialogCounter(null)}
                 counter={drinkDialogCounter}
             />
+
+            {/* Adjust Time Dialog */}
+            {(() => {
+                const previewElapsed =
+                    (Math.max(0, parseInt(adjustHours, 10) || 0)) * 3600 +
+                    (Math.max(0, Math.min(59, parseInt(adjustMinutes, 10) || 0))) * 60 +
+                    (Math.max(0, Math.min(59, parseInt(adjustSeconds, 10) || 0)))
+                const counterType = adjustTimeCounter?.type
+                const sett = counterType ? (counterSettings[counterType] || {}) : {}
+                const multiplier = adjustTimeCounter?.multiplier || 1
+                const previewPrice = calculateCounterPrice(previewElapsed, sett, multiplier)
+
+                return (
+                    <Dialog open={!!adjustTimeCounter} onOpenChange={(open) => !open && setAdjustTimeCounter(null)}>
+                        <DialogContent className="max-w-sm">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Clock2 className="w-5 h-5 text-blue-500" />
+                                    Ajuster le temps — {adjustTimeCounter?.name}
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Définissez le temps écoulé depuis le début de la session. Le compteur continuera à partir de ce point.
+                                </DialogDescription>
+                            </DialogHeader>
+
+                            <div className="space-y-5 py-2">
+                                {/* Current elapsed */}
+                                <div className="flex items-center justify-between text-sm rounded-lg bg-muted/40 px-4 py-3 border border-border/50">
+                                    <span className="text-muted-foreground">Temps actuel</span>
+                                    <span className="font-mono-timer font-semibold">{formatDuration(adjustTimeCounter?.elapsed || 0)}</span>
+                                </div>
+
+                                {/* Time inputs */}
+                                <div>
+                                    <Label className="mb-2 block">Nouveau temps écoulé</Label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="space-y-1">
+                                            <Label htmlFor="adj-hours" className="text-xs text-muted-foreground">Heures</Label>
+                                            <Input
+                                                id="adj-hours"
+                                                type="number"
+                                                min="0"
+                                                max="23"
+                                                value={adjustHours}
+                                                onChange={(e) => setAdjustHours(e.target.value)}
+                                                className="text-center font-mono-timer text-lg h-12"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label htmlFor="adj-minutes" className="text-xs text-muted-foreground">Minutes</Label>
+                                            <Input
+                                                id="adj-minutes"
+                                                type="number"
+                                                min="0"
+                                                max="59"
+                                                value={adjustMinutes}
+                                                onChange={(e) => setAdjustMinutes(e.target.value)}
+                                                className="text-center font-mono-timer text-lg h-12"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label htmlFor="adj-seconds" className="text-xs text-muted-foreground">Secondes</Label>
+                                            <Input
+                                                id="adj-seconds"
+                                                type="number"
+                                                min="0"
+                                                max="59"
+                                                value={adjustSeconds}
+                                                onChange={(e) => setAdjustSeconds(e.target.value)}
+                                                className="text-center font-mono-timer text-lg h-12"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Preview */}
+                                <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 px-4 py-3 space-y-1">
+                                    <p className="text-xs text-muted-foreground">Aperçu après ajustement</p>
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-mono-timer font-bold text-xl text-blue-400">
+                                            {formatDuration(previewElapsed)}
+                                        </span>
+                                        <span className="font-bold text-orange-500 text-lg">
+                                            {formatPrice(previewPrice)}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        L'heure de début sera recalculée automatiquement
+                                    </p>
+                                </div>
+                            </div>
+
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setAdjustTimeCounter(null)}>Annuler</Button>
+                                <Button
+                                    onClick={handleConfirmAdjustTime}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                >
+                                    <Clock2 className="w-4 h-4 mr-2" />
+                                    Appliquer
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                )
+            })()}
         </div>
     )
 }

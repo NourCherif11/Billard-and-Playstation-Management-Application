@@ -51,7 +51,7 @@ export async function getSettings() {
     data.forEach(row => {
       if (row.key === 'hourlyRate') {
         settings[row.key] = parseFloat(row.value)
-      } else if (row.key === 'tableCount') {
+      } else if (row.key === 'tableCount' || row.key === 'lowStockThreshold') {
         settings[row.key] = parseInt(row.value)
       } else {
         settings[row.key] = row.value
@@ -65,8 +65,9 @@ export async function getSettings() {
     return {
       hourlyRate: 10,
       currency: 'TND',
-      clubName: 'GamePark',
+      clubName: 'GameNightHall',
       tableCount: 4,
+      lowStockThreshold: 5,
     }
   }
 }
@@ -369,6 +370,7 @@ export async function getDrinks() {
       price: parseFloat(d.price),
       category: d.category,
       available: d.available,
+      stock: d.stock ?? null,
       createdAt: d.created_at,
     }))
   } catch (error) {
@@ -387,6 +389,7 @@ export async function addDrink(drink) {
         price: drink.price,
         category: drink.category || 'other',
         available: drink.available !== undefined ? drink.available : true,
+        stock: drink.stock !== undefined ? drink.stock : null,
       })
       .select()
       .single()
@@ -400,6 +403,7 @@ export async function addDrink(drink) {
       price: parseFloat(data.price),
       category: data.category,
       available: data.available,
+      stock: data.stock ?? null,
       createdAt: data.created_at,
     }
   } catch (error) {
@@ -416,6 +420,7 @@ export async function updateDrink(drinkId, updates) {
     if ('price' in updates) dbUpdates.price = updates.price
     if ('category' in updates) dbUpdates.category = updates.category
     if ('available' in updates) dbUpdates.available = updates.available
+    if ('stock' in updates) dbUpdates.stock = updates.stock
 
     const { data, error } = await supabase
       .from('drinks')
@@ -433,11 +438,39 @@ export async function updateDrink(drinkId, updates) {
       price: parseFloat(data.price),
       category: data.category,
       available: data.available,
+      stock: data.stock ?? null,
       createdAt: data.created_at,
     }
   } catch (error) {
     console.error('❌ [STORAGE] Error updating drink:', error)
     return null
+  }
+}
+
+export async function deductDrinkStock(drinkId, quantity) {
+  try {
+    // Fetch current stock first
+    const { data: drink, error: fetchError } = await supabase
+      .from('drinks')
+      .select('stock')
+      .eq('id', drinkId)
+      .single()
+
+    if (fetchError) throw fetchError
+    if (drink.stock === null) return true // Stock not tracked for this drink
+
+    const newStock = Math.max(0, drink.stock - quantity)
+
+    const { error } = await supabase
+      .from('drinks')
+      .update({ stock: newStock })
+      .eq('id', drinkId)
+
+    if (error) throw error
+    return true
+  } catch (error) {
+    console.error('❌ [STORAGE] Error deducting drink stock:', error)
+    return false
   }
 }
 

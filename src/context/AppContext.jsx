@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   getBills, addBill, updateBill as storageUpdateBill, markBillAsPaid, deleteBill,
   getSettings, updateSettings, seedDemoData,
@@ -7,7 +7,7 @@ import {
   updateCounterState as storageUpdateCounterState,
   getCounterSettings, updateCounterSettings as storageUpdateCounterSettings,
   getDrinks, addDrink as storageAddDrink, updateDrink as storageUpdateDrink, deleteDrink as storageDeleteDrink,
-  getBillItems, addBillItems,
+  getBillItems, addBillItems, deductDrinkStock,
 } from '@/lib/storage'
 import { generateId, calculatePrice, calculateCounterPrice, formatPrice } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
@@ -55,7 +55,8 @@ export function AppProvider({ children }) {
   const [bills, setBills] = useState([])
   const [settings, setSettings] = useState({
     currency: 'TND',
-    clubName: 'GamePark',
+    clubName: 'GameNightHall',
+    lowStockThreshold: 5,
   })
   const [players, setPlayers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -219,6 +220,28 @@ export function AppProvider({ children }) {
     return sessionInfo
   }, [counters, counterSettings])
 
+  // Adjust the elapsed time of an active counter (SuperAdmin only)
+  // newElapsedSeconds: the new total elapsed time in seconds
+  const adjustCounterTime = useCallback(async (counterId, newElapsedSeconds) => {
+    const counter = counters.find(c => c.id === counterId)
+    if (!counter || !counter.active) return
+
+    const newStartTime = new Date(Date.now() - newElapsedSeconds * 1000).toISOString()
+
+    // Update local state immediately
+    setCounters(prev => prev.map(c =>
+      c.id === counterId ? { ...c, elapsed: newElapsedSeconds, startTime: newStartTime } : c
+    ))
+
+    // Persist to DB
+    await storageUpdateCounterState(counterId, {
+      active: true,
+      startTime: newStartTime,
+      drinks: counter.drinks || [],
+      startedBy: counter.startedBy,
+    })
+  }, [counters])
+
   // Add drink to an active counter
   const addDrinkToCounter = useCallback(async (counterId, drink, quantity = 1) => {
     setCounters(prev => prev.map(c => {
@@ -238,6 +261,23 @@ export function AppProvider({ children }) {
         return { ...c, drinks: newDrinks }
       }
       return c
+    }))
+  }, [])
+
+  // Replace the full drink list for an active counter (used when editing existing orders)
+  const setCounterDrinks = useCallback(async (counterId, newDrinks) => {
+    setCounters(prev => prev.map(c => {
+      if (c.id !== counterId) return c
+      // preserve __multiplier metadata entries (used for PS controller count)
+      const meta = (c.drinks || []).filter(d => d.__multiplier)
+      const merged = [...meta, ...newDrinks]
+      storageUpdateCounterState(counterId, {
+        active: c.active,
+        startTime: c.startTime,
+        drinks: merged,
+        startedBy: c.startedBy,
+      })
+      return { ...c, drinks: merged }
     }))
   }, [])
 
@@ -341,6 +381,14 @@ export function AppProvider({ children }) {
       if (items.length > 0) {
         await addBillItems(createdBill.id, items)
       }
+
+      // Deduct stock for drinks on this bill
+      if (sessionInfo.drinks && sessionInfo.drinks.length > 0) {
+        await Promise.all(
+          sessionInfo.drinks.map(drink => deductDrinkStock(drink.id, drink.quantity))
+        )
+        await refreshDrinks()
+      }
     }
 
     await refreshBills()
@@ -412,6 +460,39 @@ export function AppProvider({ children }) {
     return result
   }, [refreshDrinks])
 
+  // Update app-level settings (e.g. lowStockThreshold)
+  const updateAppSettings = useCallback(async (updates) => {
+    const result = await updateSettings(updates)
+    if (result) {
+      setSettings(result)
+    }
+    return result
+  }, [])
+
+  // Effective stock = DB stock minus quantities reserved in active counter carts.
+  // This ensures all open sessions and the pick-dialog immediately see real available stock
+  // without waiting for a bill to be finalized.
+  const effectiveDrinks = useMemo(() => {
+    const reserved = {}
+    counters.forEach(counter => {
+      if (counter.active && Array.isArray(counter.drinks)) {
+        counter.drinks.forEach(d => {
+          if (!d.__multiplier && d.id) {
+            reserved[d.id] = (reserved[d.id] || 0) + (d.quantity || 1)
+          }
+        })
+      }
+    })
+    return drinks.map(drink => {
+      const reservedQty = reserved[drink.id] || 0
+      if (reservedQty === 0) return drink
+      if (drink.stock !== null && drink.stock !== undefined) {
+        return { ...drink, stock: Math.max(0, drink.stock - reservedQty) }
+      }
+      return drink
+    })
+  }, [drinks, counters])
+
   // Refresh all data (for DB operations)
   const refreshData = useCallback(async () => {
     console.log('🔄 [APPCONTEXT] Refreshing all data...')
@@ -449,13 +530,14 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       counters,
       counterSettings,
-      drinks,
+      drinks: effectiveDrinks,
       bills,
       settings,
       players,
       startCounter,
       stopCounter,
       addDrinkToCounter,
+      setCounterDrinks,
       addNewCounter,
       editCounter,
       removeCounter,
@@ -469,12 +551,14 @@ export function AppProvider({ children }) {
       refreshCounterSettings,
       refreshDrinks,
       refreshData,
+      adjustCounterTime,
       addNewPlayer,
       editPlayer,
       removePlayer,
       addNewDrink,
       editDrink,
       removeDrink,
+      updateAppSettings,
     }}>
       {children}
     </AppContext.Provider>
